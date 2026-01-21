@@ -3,11 +3,8 @@ import 'dart:math' as math;
 
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart' hide Config;
 import 'package:image/image.dart' as img;
-import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:photo_editor/core/model/image_model.dart';
@@ -15,9 +12,6 @@ import 'package:photo_editor/core/model/overlay_model.dart';
 import 'package:photo_editor/core/utils/utils.dart';
 import 'package:photo_editor/features/domain/repository/image_repository.dart';
 import 'package:photo_editor/features/domain/usecases/add_drawing_usecase.dart';
-import 'package:photo_editor/features/domain/usecases/add_emoji_usecase.dart';
-import 'package:photo_editor/features/domain/usecases/add_sticker_usecase.dart';
-import 'package:photo_editor/features/domain/usecases/add_text_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/apply_batch_overlays_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/apply_filter_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/create_collage_usecase.dart';
@@ -56,24 +50,21 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   late final ApplyFilterUseCase _applyFilterUseCase;
   late final SaveImageUseCase _saveImageUseCase;
   late final CropImageUseCase _cropImageUseCase;
-  late final AddTextOverlayUseCase _addTextOverlayUseCase;
-  late final AddStickerUseCase _addStickerUseCase;
-  late final AddEmojiOverlayUseCase _addEmojiOverlayUseCase;
   late final AddDrawingOverlayUseCase _addDrawingOverlayUseCase;
   late final ApplyBatchOverlaysUseCase _applyBatchOverlaysUseCase;
 
   final GlobalKey _stackKey = GlobalKey();
 
+  bool _showEmojiPicker = false;
   bool _showTextInput = false;
   String _inputText = '';
   Color _textColor = Colors.white;
   final List<String> _addedTexts = [];
   final List<Offset> _textPositions = [];
   final List<Color> _textColors = [];
-
-  bool _showEmojiPicker = false;
   final List<String> _addedStickers = [];
   final List<Offset> _stickerPositions = [];
+  final List<double> _stickerScales = [];
 
   bool _isDrawingMode = false;
   Color _drawingColor = Colors.black;
@@ -90,9 +81,6 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     _applyFilterUseCase = ApplyFilterUseCase(widget.repository);
     _saveImageUseCase = SaveImageUseCase(widget.repository);
     _cropImageUseCase = CropImageUseCase(widget.repository);
-    _addTextOverlayUseCase = AddTextOverlayUseCase(widget.repository);
-    _addStickerUseCase = AddStickerUseCase(widget.repository);
-    _addEmojiOverlayUseCase = AddEmojiOverlayUseCase(widget.repository);
     _addDrawingOverlayUseCase = AddDrawingOverlayUseCase(widget.repository);
     _applyBatchOverlaysUseCase = ApplyBatchOverlaysUseCase(widget.repository);
 
@@ -139,12 +127,24 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                   if (_currentImage != null) ...[
                     _buildFilterCarousel(),
                     if (_isDrawingMode) _buildDrawingControls(),
-                    if (_showTextInput) _buildTextInputField(),
                     _buildSaveButton(colorScheme),
                   ],
                 ],
               ),
-              if (_showEmojiPicker) _buildEmojiPicker(),
+              if (_showEmojiPicker)
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: _buildEmojiPicker(),
+                ),
+              if (_showTextInput)
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: _buildTextInputField(),
+                ),
             ],
           ),
         ),
@@ -158,7 +158,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.transparent, Colors.black.withOpacity(0.1)],
+          colors: [Colors.transparent, Colors.black.withValues(alpha: 0.1)],
         ),
       ),
       child: Row(
@@ -448,7 +448,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   Widget _buildTextInputField() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      color: Colors.black.withOpacity(0.8),
+      color: Colors.black.withValues(alpha: 0.8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -461,7 +461,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                     hintText: 'Enter text',
                     hintStyle: const TextStyle(color: Colors.white70),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.1),
+                    fillColor: Colors.white.withValues(alpha: 0.1),
                     border: const OutlineInputBorder(borderSide: BorderSide.none),
                     suffixIcon: _inputText.isNotEmpty 
                       ? Row(
@@ -728,6 +728,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     setState(() {
       _addedStickers.add(emojiUnicode);
       _stickerPositions.add(const Offset(100, 100));
+      _stickerScales.add(1.0);
       _showEmojiPicker = false;
     });
   }
@@ -821,6 +822,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         _isLoadingPreview = true;
       });
       final collageFile = await _createCollageUseCase.execute(_collageImages);
+      if (!mounted) return;
       if (collageFile != null) {
         final newModel = ImageModel(
           file: collageFile,
@@ -873,6 +875,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         _isLoadingPreview = true;
       });
       final updatedFile = await _createCollageUseCase.execute(_collageImages);
+      if (!mounted) return;
       if (updatedFile != null) {
         final newModel = ImageModel(
           file: updatedFile,

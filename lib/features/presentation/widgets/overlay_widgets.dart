@@ -80,7 +80,7 @@ class OverlayManager extends StatelessWidget {
                 inputText,
                 style: GoogleFonts.roboto(
                   fontSize: 32,
-                  color: textColor.withOpacity(0.5),
+                  color: textColor.withValues(alpha: 0.5),
                   fontWeight: FontWeight.bold,
                   shadows: const [
                     Shadow(

@@ -35,7 +35,7 @@ class FilterPreview extends StatelessWidget {
                   width: 1.5,
                 ),
                 borderRadius: BorderRadius.circular(10),
-                color: Colors.white.withOpacity(0.1),
+                color: Colors.white.withValues(alpha: 0.1),
               ),
               child: Column(
                 children: [
