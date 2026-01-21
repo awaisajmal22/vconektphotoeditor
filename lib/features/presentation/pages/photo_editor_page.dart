@@ -9,12 +9,16 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:photo_editor/core/model/image_model.dart';
+import 'package:photo_editor/core/model/overlay_model.dart';
 import 'package:photo_editor/core/utils/utils.dart';
 import 'package:photo_editor/features/domain/repository/image_repository.dart';
 import 'package:photo_editor/features/domain/usecases/add_drawing_usecase.dart';
+import 'package:photo_editor/features/domain/usecases/add_emoji_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/add_sticker_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/add_text_usecase.dart';
+import 'package:photo_editor/features/domain/usecases/apply_batch_overlays_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/apply_filter_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/create_collage_usecase.dart';
 import 'package:photo_editor/features/domain/usecases/crop_image_usecase.dart';
@@ -54,7 +58,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   late final CropImageUseCase _cropImageUseCase;
   late final AddTextOverlayUseCase _addTextOverlayUseCase;
   late final AddStickerUseCase _addStickerUseCase;
+  late final AddEmojiOverlayUseCase _addEmojiOverlayUseCase;
   late final AddDrawingOverlayUseCase _addDrawingOverlayUseCase;
+  late final ApplyBatchOverlaysUseCase _applyBatchOverlaysUseCase;
 
   final GlobalKey _stackKey = GlobalKey();
 
@@ -86,7 +92,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     _cropImageUseCase = CropImageUseCase(widget.repository);
     _addTextOverlayUseCase = AddTextOverlayUseCase(widget.repository);
     _addStickerUseCase = AddStickerUseCase(widget.repository);
+    _addEmojiOverlayUseCase = AddEmojiOverlayUseCase(widget.repository);
     _addDrawingOverlayUseCase = AddDrawingOverlayUseCase(widget.repository);
+    _applyBatchOverlaysUseCase = ApplyBatchOverlaysUseCase(widget.repository);
 
     _animationController = AnimationController(
       vsync: this,
@@ -208,6 +216,20 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                             Icons.text_fields,
                             'Text',
                             _toggleTextInput,
+                            Colors.white,
+                          ),
+                        if (_currentImage != null)
+                          ActionButton(
+                            Icons.emoji_emotions,
+                            'Stickers',
+                            () => setState(() => _showEmojiPicker = !_showEmojiPicker),
+                            Colors.white,
+                          ),
+                        if (_currentImage != null)
+                          ActionButton(
+                            Icons.brush,
+                            'Draw',
+                            () => setState(() => _isDrawingMode = !_isDrawingMode),
                             Colors.white,
                           ),
                       ],
@@ -360,9 +382,20 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   Future<Uint8List> _generateThumbnail(String filterKey) async {
     if (_originalImage == null) return Uint8List(0);
     final bytes = await _originalImage!.file.readAsBytes();
+    
+    return compute(_generateThumbnailIsolate, {
+      'bytes': bytes,
+      'filterKey': filterKey,
+    });
+  }
+
+  static Uint8List _generateThumbnailIsolate(Map<String, dynamic> params) {
+    final Uint8List bytes = params['bytes'];
+    final String filterKey = params['filterKey'];
+    
     final original = img.decodeImage(bytes)!;
     final thumbnail = FilterUtils.applyFilterThumbnail(original, filterKey);
-    return Uint8List.fromList(img.encodeJpg(thumbnail));
+    return Uint8List.fromList(img.encodeJpg(thumbnail, quality: 50)); // Lower quality for thumbnails
   }
 
   Widget _buildDrawingControls() {
@@ -381,6 +414,16 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
               ),
               child: const Icon(Icons.palette, color: Colors.white, size: 20),
             ),
+          ),
+          IconButton(
+            onPressed: _bakeDrawing,
+            icon: const Icon(Icons.check_circle, color: Colors.green, size: 32),
+            tooltip: 'Apply Drawing',
+          ),
+          IconButton(
+            onPressed: () => setState(() => _drawingPaths.clear()),
+            icon: const Icon(Icons.delete_sweep, color: Colors.white70, size: 28),
+            tooltip: 'Clear Drawing',
           ),
           Expanded(
             child: Column(
@@ -511,14 +554,17 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     final RenderBox? box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0};
 
-    final bytes = await _currentImage!.file.readAsBytes();
-    final image = img.decodeImage(bytes);
-    if (image == null) return {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0};
+    final Uint8List bytes = await _currentImage!.file.readAsBytes();
+    final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    final ui.ImageDescriptor descriptor = await ui.ImageDescriptor.encoded(buffer);
+    
+    final double imageW = descriptor.width.toDouble();
+    final double imageH = descriptor.height.toDouble();
+    descriptor.dispose();
+    buffer.dispose();
 
     final double screenW = box.size.width;
     final double screenH = box.size.height;
-    final double imageW = image.width.toDouble();
-    final double imageH = image.height.toDouble();
 
     final double scaleX = screenW / imageW;
     final double scaleY = screenH / imageH;
@@ -646,6 +692,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   Future<void> _bakeDrawing() async {
     if (_originalImage == null || _drawingPaths.isEmpty) return;
 
+    setState(() => _isLoadingPreview = true);
     final factors = await _getScaleFactors();
     final double scale = factors['scale']!;
     final double offsetX = factors['offsetX']!;
@@ -674,6 +721,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         _drawingPaths.clear();
       });
     }
+    setState(() => _isLoadingPreview = false);
   }
 
   void _addSticker(String emojiUnicode) {
@@ -682,33 +730,6 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       _stickerPositions.add(const Offset(100, 100));
       _showEmojiPicker = false;
     });
-  }
-
-  Future<File?> _saveEmojiAsTemp(String unicode) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    const size = 64.0;
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: unicode,
-        style: const TextStyle(fontSize: size, color: Colors.black),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout(minWidth: size, maxWidth: size);
-    textPainter.paint(canvas, Offset.zero);
-
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(size.toInt(), size.toInt());
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    final buffer = byteData!.buffer.asUint8List();
-
-    final tempDir = await getTemporaryDirectory();
-    final tempFile = File(
-      '${tempDir.path}/sticker_${DateTime.now().millisecondsSinceEpoch}.png',
-    );
-    await tempFile.writeAsBytes(buffer);
-    return tempFile;
   }
 
   Future<void> _applyFilter(String filter) async {
@@ -883,41 +904,65 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     if (_currentImage == null) return;
 
     setState(() => _isLoadingPreview = true);
-    File finalFile = _currentImage!.file;
-
+    
     final factors = await _getScaleFactors();
     final double scale = factors['scale']!;
     final double offsetX = factors['offsetX']!;
     final double offsetY = factors['offsetY']!;
 
+    final List<OverlayModel> overlays = [];
+
+    // Add texts
     for (int i = 0; i < _addedTexts.length; i++) {
-      final textFile = await _addTextOverlayUseCase.execute(
-        finalFile,
-        _addedTexts[i],
-        x: ((_textPositions[i].dx - offsetX) / scale).round(),
-        y: ((_textPositions[i].dy - offsetY) / scale).round(),
-        textColor: _textColors[i],
+      overlays.add(TextOverlayModel(
+        x: (_textPositions[i].dx - offsetX) / scale,
+        y: (_textPositions[i].dy - offsetY) / scale,
+        text: _addedTexts[i],
+        color: _textColors[i],
         fontSize: 32 / scale,
-      );
-      if (textFile != null) finalFile = textFile;
+      ));
     }
 
+    // Add emojis/stickers
     for (int i = 0; i < _addedStickers.length; i++) {
-      final stickerFile = await _saveEmojiAsTemp(_addedStickers[i]);
-      if (stickerFile != null) {
-        final stickerOverlay = await _addStickerUseCase.execute(
-          finalFile,
-          stickerFile.path,
-          x: ((_stickerPositions[i].dx - offsetX) / scale).round(),
-          y: ((_stickerPositions[i].dy - offsetY) / scale).round(),
-          scale: 1.0 / scale,
-        );
-        if (stickerOverlay != null) finalFile = stickerOverlay;
+      overlays.add(EmojiOverlayModel(
+        x: (_stickerPositions[i].dx - offsetX) / scale,
+        y: (_stickerPositions[i].dy - offsetY) / scale,
+        emoji: _addedStickers[i],
+        fontSize: 64 / scale,
+      ));
+    }
+
+    // Add drawing if any
+    if (_drawingPaths.isNotEmpty) {
+      final scaledPaths = _drawingPaths.map((path) {
+        final Matrix4 matrix = Matrix4.identity()
+          ..translate(-offsetX, -offsetY)
+          ..scale(1 / scale);
+        return path.transform(matrix.storage);
+      }).toList();
+
+      overlays.add(DrawingOverlayModel(
+        paths: scaledPaths,
+        color: _drawingColor,
+        brushSize: _brushSize / scale,
+      ));
+    }
+
+    File finalFile = _currentImage!.file;
+    if (overlays.isNotEmpty) {
+      final processedFile = await _applyBatchOverlaysUseCase.execute(
+        _currentImage!.file,
+        overlays,
+      );
+      if (processedFile != null) {
+        finalFile = processedFile;
       }
     }
 
     final success = await _saveImageUseCase.execute(finalFile);
     setState(() => _isLoadingPreview = false);
+    
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -936,6 +981,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         _textColors.clear();
         _addedStickers.clear();
         _stickerPositions.clear();
+        _drawingPaths.clear();
       });
     }
   }
