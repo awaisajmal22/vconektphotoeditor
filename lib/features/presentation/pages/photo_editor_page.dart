@@ -38,6 +38,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     with TickerProviderStateMixin {
   ImageModel? _currentImage;
   ImageModel? _originalImage;
+  Uint8List? _originalImageBytes;
   List<File> _collageImages = [];
   String _selectedFilter = 'none';
   bool _isLoadingPreview = false;
@@ -62,6 +63,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   final List<String> _addedTexts = [];
   final List<Offset> _textPositions = [];
   final List<Color> _textColors = [];
+  final List<double> _textScales = [];
   final List<String> _addedStickers = [];
   final List<Offset> _stickerPositions = [];
   final List<double> _stickerScales = [];
@@ -99,6 +101,41 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   void dispose() {
     _animationController.dispose();
     super.dispose();
+  }
+
+  void _removeText(int index) {
+    setState(() {
+      _addedTexts.removeAt(index);
+      _textPositions.removeAt(index);
+      _textColors.removeAt(index);
+      _textScales.removeAt(index);
+    });
+  }
+
+  void _removeSticker(int index) {
+    setState(() {
+      _addedStickers.removeAt(index);
+      _stickerPositions.removeAt(index);
+      _stickerScales.removeAt(index);
+    });
+  }
+
+  void _removeCurrentImage() {
+    setState(() {
+      _currentImage = null;
+      _originalImage = null;
+      _originalImageBytes = null;
+      _addedTexts.clear();
+      _textPositions.clear();
+      _textColors.clear();
+      _textScales.clear();
+      _addedStickers.clear();
+      _stickerPositions.clear();
+      _stickerScales.clear();
+      _drawingPaths.clear();
+      _currentPath = ui.Path();
+      _selectedFilter = 'none';
+    });
   }
 
   @override
@@ -180,6 +217,13 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
+                        if (_currentImage != null)
+                          ActionButton(
+                            Icons.close,
+                            'Close',
+                            _removeCurrentImage,
+                            Colors.redAccent,
+                          ),
                         if (_currentImage?.isFiltered == true)
                           ActionButton(
                             Icons.undo,
@@ -309,6 +353,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                     brushSize: _brushSize,
                   ),
                 OverlayManager(
+                  textScales: [..._textScales],
+                  onTextScale: (index, scale) {
+                    setState(() {
+                      _textScales[index] = scale;
+                    });
+                  },
                   inputText: _inputText,
                   textColor: _textColor,
                   addedTexts: _addedTexts,
@@ -326,8 +376,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                       }
                     });
                   },
+                  onRemoveText: _removeText,
                   addedStickers: _addedStickers,
                   stickerPositions: _stickerPositions,
+                  stickerScales: _stickerScales,
                   onStickerDrag: (index, delta) {
                     setState(() {
                       _stickerPositions[index] += delta;
@@ -338,6 +390,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                           _stickerPositions[index].dy.clamp(0, box.size.height - 40),
                         );
                       }
+                    });
+                  },
+                  onRemoveSticker: _removeSticker,
+                  onStickerScale: (index, scale) {
+                    setState(() {
+                      _stickerScales[index] = scale;
                     });
                   },
                 ),
@@ -381,10 +439,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
 
   Future<Uint8List> _generateThumbnail(String filterKey) async {
     if (_originalImage == null) return Uint8List(0);
-    final bytes = await _originalImage!.file.readAsBytes();
+    _originalImageBytes ??= await _originalImage!.file.readAsBytes();
     
     return compute(_generateThumbnailIsolate, {
-      'bytes': bytes,
+      'bytes': _originalImageBytes!,
       'filterKey': filterKey,
     });
   }
@@ -393,7 +451,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     final Uint8List bytes = params['bytes'];
     final String filterKey = params['filterKey'];
     
-    final original = img.decodeImage(bytes)!;
+    final original = img.decodeImage(bytes);
+    if (original == null) return Uint8List(0);
+    
     final thumbnail = FilterUtils.applyFilterThumbnail(original, filterKey);
     return Uint8List.fromList(img.encodeJpg(thumbnail, quality: 50)); // Lower quality for thumbnails
   }
@@ -543,6 +603,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       _addedTexts.add(_inputText);
       _textPositions.add(const Offset(50, 50));
       _textColors.add(_textColor);
+      _textScales.add(1.0);
       _inputText = '';
       _showTextInput = false;
     });
@@ -554,7 +615,14 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     final RenderBox? box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return {'scale': 1.0, 'offsetX': 0.0, 'offsetY': 0.0};
 
-    final Uint8List bytes = await _currentImage!.file.readAsBytes();
+    final Uint8List bytes;
+    if (_currentImage == _originalImage) {
+      _originalImageBytes ??= await _currentImage!.file.readAsBytes();
+      bytes = _originalImageBytes!;
+    } else {
+      bytes = await _currentImage!.file.readAsBytes();
+    }
+    
     final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
     final ui.ImageDescriptor descriptor = await ui.ImageDescriptor.encoded(buffer);
     
@@ -694,6 +762,8 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
 
     setState(() => _isLoadingPreview = true);
     final factors = await _getScaleFactors();
+    if (!mounted) return;
+    
     final double scale = factors['scale']!;
     final double offsetX = factors['offsetX']!;
     final double offsetY = factors['offsetY']!;
@@ -711,6 +781,8 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       _drawingColor,
       _brushSize / scale,
     );
+    if (!mounted) return;
+    
     if (newFile != null) {
       setState(() {
         _originalImage = ImageModel(
@@ -718,6 +790,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           isCollage: _originalImage!.isCollage,
         );
         _currentImage = _originalImage;
+        _originalImageBytes = null;
         _drawingPaths.clear();
       });
     }
@@ -740,6 +813,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         _originalImage!.file,
         filter,
       );
+      if (!mounted) return;
       setState(() {
         _currentImage = ImageModel(
           file: editedFile,
@@ -770,6 +844,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   Future<void> _cropImage() async {
     if (_currentImage != null) {
       final cropped = await _cropImageUseCase.execute(_currentImage!.file);
+      if (!mounted) return;
       if (cropped != null) {
         final newModel = ImageModel(
           file: cropped,
@@ -779,6 +854,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         setState(() {
           _originalImage = newModel;
           _currentImage = newModel;
+          _originalImageBytes = null;
           _selectedFilter = 'none';
           _isLoadingPreview = true;
         });
@@ -792,6 +868,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
 
   Future<void> _pickImage() async {
     final image = await _pickImageUseCase.execute();
+    if (!mounted) return;
     if (image != null) {
       final baseModel = ImageModel(
         file: image.file,
@@ -801,12 +878,18 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       setState(() {
         _originalImage = baseModel;
         _currentImage = baseModel;
+        _originalImageBytes = null;
         _selectedFilter = 'none';
         _collageImages.clear();
         _inputText = '';
         _showTextInput = false;
+        _addedTexts.clear();
+        _textPositions.clear();
+        _textColors.clear();
+        _textScales.clear();
         _addedStickers.clear();
         _stickerPositions.clear();
+        _stickerScales.clear();
         _drawingPaths.clear();
       });
       _animationController.reset();
@@ -815,8 +898,35 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   }
 
   Future<void> _createCollage() async {
-    final images = await _pickMultipleImagesUseCase.execute();
+    final images = await _pickMultipleImagesUseCase.execute(minImages: 1);
     if (images != null && images.isNotEmpty) {
+      if (images.length == 1) {
+        final newModel = ImageModel(
+          file: images[0].file,
+          isFiltered: false,
+          isCollage: true,
+        );
+        setState(() {
+          _collageImages = [images[0].file];
+          _originalImage = newModel;
+          _currentImage = newModel;
+          _originalImageBytes = null;
+          _selectedFilter = 'none';
+          _isLoadingPreview = false;
+          _inputText = '';
+          _showTextInput = false;
+          _addedTexts.clear();
+          _textPositions.clear();
+          _textColors.clear();
+          _textScales.clear();
+          _addedStickers.clear();
+          _stickerPositions.clear();
+          _stickerScales.clear();
+          _drawingPaths.clear();
+        });
+        return;
+      }
+
       setState(() {
         _collageImages = images.map((m) => m.file).toList();
         _isLoadingPreview = true;
@@ -832,12 +942,18 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         setState(() {
           _originalImage = newModel;
           _currentImage = newModel;
+          _originalImageBytes = null;
           _selectedFilter = 'none';
           _isLoadingPreview = false;
           _inputText = '';
           _showTextInput = false;
+          _addedTexts.clear();
+          _textPositions.clear();
+          _textColors.clear();
+          _textScales.clear();
           _addedStickers.clear();
           _stickerPositions.clear();
+          _stickerScales.clear();
           _drawingPaths.clear();
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -849,18 +965,6 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           ),
         );
       }
-    } else if (images != null && images.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please select at least 2 images for a collage.'),
-          backgroundColor: Colors.orange,
-          action: SnackBarAction(
-            label: 'Pick Single',
-            textColor: Colors.white,
-            onPressed: _pickImage,
-          ),
-        ),
-      );
     }
   }
 
@@ -885,12 +989,18 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         setState(() {
           _originalImage = newModel;
           _currentImage = newModel;
+          _originalImageBytes = null;
           _selectedFilter = 'none';
           _isLoadingPreview = false;
           _inputText = '';
           _showTextInput = false;
+          _addedTexts.clear();
+          _textPositions.clear();
+          _textColors.clear();
+          _textScales.clear();
           _addedStickers.clear();
           _stickerPositions.clear();
+          _stickerScales.clear();
           _drawingPaths.clear();
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -922,17 +1032,26 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         y: (_textPositions[i].dy - offsetY) / scale,
         text: _addedTexts[i],
         color: _textColors[i],
-        fontSize: 32 / scale,
+        fontSize: (32 * _textScales[i]) / scale,
       ));
     }
 
     // Add emojis/stickers
     for (int i = 0; i < _addedStickers.length; i++) {
+      final stickerScale = _stickerScales[i];
+      final baseSize = 48.0;
+      
+      // Calculate the offset to account for Transform.scale(scale: stickerScale)
+      // which scales from the center.
+      // In UI, it's at _stickerPositions[i] (top-left of unscaled)
+      // When scaled by S, it effectively moves top-left by -size*(S-1)/2
+      final shift = (baseSize * (stickerScale - 1.0)) / 2.0;
+
       overlays.add(EmojiOverlayModel(
-        x: (_stickerPositions[i].dx - offsetX) / scale,
-        y: (_stickerPositions[i].dy - offsetY) / scale,
+        x: (_stickerPositions[i].dx - shift - offsetX) / scale,
+        y: (_stickerPositions[i].dy - shift - offsetY) / scale,
         emoji: _addedStickers[i],
-        fontSize: 64 / scale,
+        fontSize: (baseSize * stickerScale) / scale,
       ));
     }
 
@@ -964,26 +1083,28 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     }
 
     final success = await _saveImageUseCase.execute(finalFile);
+    if (!mounted) return;
     setState(() => _isLoadingPreview = false);
     
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(success ? 'Saved to Gallery!' : 'Save failed'),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
-    }
 
     if (success) {
       setState(() {
         _inputText = '';
         _showTextInput = false;
+        _isDrawingMode = false;
         _addedTexts.clear();
         _textPositions.clear();
         _textColors.clear();
+        _textScales.clear();
         _addedStickers.clear();
         _stickerPositions.clear();
+        _stickerScales.clear();
         _drawingPaths.clear();
       });
     }

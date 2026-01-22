@@ -31,7 +31,7 @@ class FilterUtils {
     final result = img.Image(width: image.width, height: image.height);
     for (int y = 0; y < image.height; y++) {
       for (int x = 0; x < image.width; x++) {
-        final pixel = image.getPixelSafe(x, y) as img.Pixel;
+        final pixel = image.getPixelSafe(x, y);
         final r = pixel.r.toInt();
         final g = pixel.g.toInt();
         final b = pixel.b.toInt();
@@ -71,7 +71,7 @@ class FilterUtils {
     final result = img.Image(width: image.width, height: image.height);
     for (int y = 0; y < image.height; y++) {
       for (int x = 0; x < image.width; x++) {
-        final pixel = image.getPixelSafe(x, y) as img.Pixel;
+        final pixel = image.getPixelSafe(x, y);
         final r = pixel.r.toInt();
         final g = pixel.g.toInt();
         final b = pixel.b.toInt();
@@ -110,7 +110,7 @@ class FilterUtils {
     final result = img.Image(width: image.width, height: image.height);
     for (int y = 0; y < image.height; y++) {
       for (int x = 0; x < image.width; x++) {
-        final pixel = image.getPixelSafe(x, y) as img.Pixel;
+        final pixel = image.getPixelSafe(x, y);
         final r = pixel.r.toInt();
         final g = pixel.g.toInt();
         final b = pixel.b.toInt();

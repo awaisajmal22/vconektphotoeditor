@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:io';
 
 class ImageModel {
   final File file;

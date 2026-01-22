@@ -47,10 +47,16 @@ class OverlayManager extends StatelessWidget {
   final List<String> addedTexts;
   final List<Offset> textPositions;
   final List<Color> textColors;
+  final List<double> textScales;
   final Function(int, Offset) onTextDrag;
+  final Function(int) onRemoveText;
+  final Function(int, double) onTextScale;
   final List<String> addedStickers;
   final List<Offset> stickerPositions;
+  final List<double> stickerScales;
   final Function(int, Offset) onStickerDrag;
+  final Function(int) onRemoveSticker;
+  final Function(int, double) onStickerScale;
 
   const OverlayManager({
     super.key,
@@ -60,9 +66,13 @@ class OverlayManager extends StatelessWidget {
     required this.textPositions,
     required this.textColors,
     required this.onTextDrag,
+    required this.onRemoveText,
     required this.addedStickers,
     required this.stickerPositions,
+    required this.stickerScales,
     required this.onStickerDrag,
+    required this.onRemoveSticker,
+    required this.onStickerScale, required this.textScales, required this.onTextScale,
   });
 
   @override
@@ -98,26 +108,50 @@ class OverlayManager extends StatelessWidget {
           (entry) => Positioned(
             left: textPositions[entry.key].dx,
             top: textPositions[entry.key].dy,
-            child: GestureDetector(
-              onPanUpdate: (details) => onTextDrag(entry.key, details.delta),
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                child: Text(
-                  entry.value,
-                  style: GoogleFonts.roboto(
-                    fontSize: 32,
-                    color: textColors[entry.key],
-                    fontWeight: FontWeight.bold,
-                    shadows: const [
-                      Shadow(
-                        blurRadius: 4.0,
-                        color: Colors.black54,
-                        offset: Offset(2.0, 2.0),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                GestureDetector(
+                  onPanUpdate: (details) => onTextDrag(entry.key, details.delta),
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    child: Text(
+                      entry.value,
+                      style: GoogleFonts.roboto(
+                        fontSize: 32,
+                        color: textColors[entry.key],
+                        fontWeight: FontWeight.bold,
+                        shadows: const [
+                          Shadow(
+                            blurRadius: 4.0,
+                            color: Colors.black54,
+                            offset: Offset(2.0, 2.0),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
+                Positioned(
+                  right: -8,
+                  top: -8,
+                  child: GestureDetector(
+                    onTap: () => onRemoveText(entry.key),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(2),
+                      child: const Icon(
+                        Icons.close,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -126,12 +160,63 @@ class OverlayManager extends StatelessWidget {
           (entry) => Positioned(
             left: stickerPositions[entry.key].dx,
             top: stickerPositions[entry.key].dy,
-            child: GestureDetector(
-              onPanUpdate: (details) => onStickerDrag(entry.key, details.delta),
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                child: Text(entry.value, style: const TextStyle(fontSize: 48)),
-              ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                GestureDetector(
+                  onPanUpdate: (details) => onStickerDrag(entry.key, details.delta),
+                  child: Transform.scale(
+                    scale: stickerScales[entry.key],
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      child: Text(entry.value, style: const TextStyle(fontSize: 48)),
+                    ),
+                  ),
+                ),
+                // Remove button
+                Positioned(
+                  right: -8,
+                  top: -8,
+                  child: GestureDetector(
+                    onTap: () => onRemoveSticker(entry.key),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(2),
+                      child: const Icon(
+                        Icons.close,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                // Scaling handle
+                Positioned(
+                  right: -8,
+                  bottom: -8,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      final newScale = (stickerScales[entry.key] + details.delta.dx / 100).clamp(0.5, 5.0);
+                      onStickerScale(entry.key, newScale);
+                    },
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(2),
+                      child: const Icon(
+                        Icons.open_in_full,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
